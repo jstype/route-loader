@@ -1,18 +1,48 @@
 {
   "name": "@jstype/route-loader",
   "version": "1.0.0",
-  "description": "",
+  "description": "Easy to load routes within a directory, support koa-radix-router, koa-router and so on.",
+  "keywords": [
+    "route",
+    "loader",
+    "koa",
+    "express",
+    "decorator"
+  ],
+  "homepage": "https://github.com/jstype/route-loader#readme",
+  "bugs": {
+    "url": "https://github.com/jstype/route-loader/issues"
+  },
+  "license": "MIT",
+  "author": "jKey Lu <jkeylu@gmail.com> (https://github.com/jkeylu)",
   "main": "index.js",
   "typings": "index.d.ts",
-  "scripts": {
-    "build": "tsc",
-    "prepublish": "npm run build",
-    "clean": "node -e '(fs=>[`index.js`,`index.js.map`,`index.d.ts`].map(f=>fs.existsSync(f)&&fs.unlinkSync(f)))(require(`fs`))'"
+  "directories": {
+    "example": "example"
   },
-  "author": "jKey Lu <jkeylu@gmail.com> (https://github.com/jkeylu)",
-  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jstype/route-loader.git"
+  },
+  "scripts": {
+    "build": "npm run clean && tsc",
+    "prepublish": "npm run build",
+    "clean": "node -e \"(fs=>['index.js','index.js.map','index.d.ts'].map(f=>fs.existsSync(f)&&fs.unlinkSync(f)))(require('fs'))\"",
+    "example": "ts-node --project example example/app"
+  },
+  "dependencies": {
+    "@jstype/loader": "^1.0.0",
+    "reflect-metadata": "^0.1.10"
+  },
   "devDependencies": {
-    "@types/node": "^7.0.5",
-    "typescript": "^2.2.0"
+    "@types/koa": "^2.0.39",
+    "@types/node": "^8.0.3",
+    "koa": "^2.3.0",
+    "koa-radix-router": "^1.0.0",
+    "ts-node": "^3.1.0",
+    "typescript": "^2.4.0"
+  },
+  "engines": {
+    "node": ">=6"
   }
 }

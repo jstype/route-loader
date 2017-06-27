@@ -1,5 +1,24 @@
-import * as fs from 'fs';
+import 'reflect-metadata';
 import * as Path from 'path';
+import {
+    ClassLoader,
+    ClassLoaderOptions,
+    ClassConstructor,
+    FileInfo,
+    FileType,
+    ModuleInfo,
+    InstanceInfo,
+    RecursiveFilterFilesOptions
+} from '@jstype/loader';
+
+export {
+    ClassConstructor,
+    FileInfo,
+    FileType,
+    ModuleInfo,
+    InstanceInfo,
+    RecursiveFilterFilesOptions
+};
 
 export const CONTROLLER = Symbol.for('@jstype/route-loader/controller');
 export const ACTIONS = Symbol.for('@jstype/route-loader/actions');
@@ -17,16 +36,17 @@ export interface Action {
     name: string;
     /** HTTP method */
     method: string;
-    path: string;
+    path?: string;
 }
 
-function createDecorator(method: string, path?: string) {
+function createDecorator(method: string, path?: string): MethodDecorator {
     return (target: object, name: string) => {
-        if (!(<any>target)[ACTIONS]) {
-            (<any>target)[ACTIONS] = [{ name, method, path }];
-        } else {
-            (<any>target)[ACTIONS].push({ name, method, path });
+        let actions: Action[] = Reflect.getMetadata(ACTIONS, target);
+        if (!actions) {
+            actions = [];
+            Reflect.defineMetadata(ACTIONS, actions, target);
         }
+        actions.push({ name, method, path });
     };
 }
 
@@ -41,27 +61,23 @@ export function HTTP(method: string, path?: string) {
     return createDecorator(method, path);
 }
 
-export interface ControllerConstructor extends Function {
-    new (...args: any[]): any;
-}
-
 export interface ControllerDecoratorOptions {
     [key: string]: any;
     prefix?: string;
 }
 
 export function Controller(opts?: ControllerDecoratorOptions): ClassDecorator {
-    return (target: ControllerConstructor) => {
-        (<any>target)[CONTROLLER] = opts || {};
+    return (target: ClassConstructor) => {
+        defineController(target, opts);
     };
 }
 
-export type FileFilterFn = (absolutePath: string, dirname: string, basename: string) => boolean;
+export function defineActions(Class: ClassConstructor, actions: Action[]) {
+    Reflect.defineMetadata(ACTIONS, actions, Class.prototype);
+}
 
-export interface FileInfo {
-    absolutePath: string;
-    dirname: string;
-    basename: string;
+export function defineController(Class: ClassConstructor, opts?: ControllerDecoratorOptions) {
+    Reflect.defineMetadata(CONTROLLER, opts || {}, Class);
 }
 
 export type CollectFn = (controller: any, action: Action, middleware: any[]) => boolean;
@@ -69,12 +85,11 @@ export type CollectFn = (controller: any, action: Action, middleware: any[]) => 
 export interface EnsurePathOptions {
     action: Action;
     file: FileInfo;
-    controllerName: string;
+    className: string;
     ctrlOpts: ControllerDecoratorOptions;
 }
 
 export interface RegisterRouteOptions {
-    router: any;
     action: Action;
     path: string;
     middleware: any[];
@@ -82,79 +97,42 @@ export interface RegisterRouteOptions {
     ctrlOpts: ControllerDecoratorOptions;
 }
 
-export interface ControllerInfo {
-    controllerName: string;
+export interface ControllerInstanceInfo extends InstanceInfo {
+    className: string;
     ctrlOpts: ControllerDecoratorOptions;
-    controller: any;
     actions: Action[];
 }
 
-export interface ProcessActionOptions {
-    controller: any;
-    action: Action;
-    controllerName: string;
-    ctrlOpts: ControllerDecoratorOptions;
-    file: FileInfo;
-}
-
-export interface LoaderOptions {
-    ext?: string;
-    fileFilter?: RegExp | FileFilterFn;
-    getFiles?: (path: string, fileFilter: FileFilterFn, ext: string) => FileInfo[];
-
-    processFile?: (this: Loader, file: FileInfo) => ControllerInfo;
+export interface LoaderOptions extends ClassLoaderOptions {
     requireControllerDecorator?: boolean;
-    controllerOpts?: any;
-    getControllerClass?: (file: FileInfo) => ControllerConstructor;
-    newController?: (Controller: ControllerConstructor, opts: any) => any;
     filterActions?: (actions: Action[], controller: any) => Action[];
 
-    processAction?: (this: Loader, opts: ProcessActionOptions) => void;
-    router?: any;
+    processAction?: (action: Action, info: ControllerInstanceInfo) => void;
     normalizeMiddleware?: (middleware: any[]) => Function[];
     ensurePath?: (opts: EnsurePathOptions) => string;
+
+    router?: any;
     registerRoute?: (opts: RegisterRouteOptions) => void;
 }
 
-export class Loader {
-    middlewareCollectors: CollectFn[];
+export default class Loader extends ClassLoader {
+    protected middlewareCollectors: CollectFn[] = [];
 
-    ext: string;
-    fileFilter: RegExp | FileFilterFn;
-    getFiles: (path: string, fileFilter: FileFilterFn, ext: string) => FileInfo[];
-
-    processFile: (this: Loader, file: FileInfo) => ControllerInfo;
     requireControllerDecorator: boolean;
-    controllerOpts?: any;
-    getControllerClass: (file: FileInfo) => ControllerConstructor;
-    newController: (Controller: ControllerConstructor, opts: any) => any;
-    filterActions?: (actions: Action[], controller: any) => Action[];
-
-    processAction: (this: Loader, opts: ProcessActionOptions) => void;
     router: any;
-    normalizeMiddleware?: (middleware: any[]) => Function[];
-    ensurePath: (opts: EnsurePathOptions) => string;
-    registerRoute: (opts: RegisterRouteOptions) => void;
 
     constructor(opts?: LoaderOptions) {
-        opts = opts || {};
+        super(opts);
 
-        this.ext = opts.ext || '.js';
-        this.fileFilter = opts.fileFilter || /.*\.js$/;
-        this.getFiles = opts.getFiles || defaultGetFiles;
-
-        this.processFile = (opts.processFile || defaultProcessFile).bind(this);
-        this.requireControllerDecorator = !!opts.requireControllerDecorator;
-        this.controllerOpts = opts.controllerOpts;
-        this.getControllerClass = opts.getControllerClass || defaultGetControllerClass;
-        this.newController = opts.newController || defaultNewController;
-        this.filterActions = opts.filterActions;
-
-        this.processAction = (opts.processAction || defaultProcessAction).bind(this);
-        this.router = opts.router;
-        this.normalizeMiddleware = opts.normalizeMiddleware;
-        this.ensurePath = opts.ensurePath || defaultEnsurePath;
-        this.registerRoute = opts.registerRoute || defaultRegisterRoute;
+        this.override([
+            'requireControllerDecorator',
+            'router',
+            'filterActions',
+            'processAction',
+            'normalizeMiddleware',
+            'ensurePath',
+            'registerRoute'
+        ], opts);
     }
 
     addMiddlewareCollector(collect: CollectFn) {
@@ -162,148 +140,96 @@ export class Loader {
         return this;
     }
 
-    load(path: string) {
-        let fileFilter = this.fileFilter as FileFilterFn;
-        if (typeof fileFilter != 'function') {
-            fileFilter = (<RegExp>fileFilter).test.bind(fileFilter);
-        }
-        let files = this.getFiles(path, fileFilter, this.ext);
-        files.forEach(file => this.loadController(file));
-    }
+    protected processClass(Class: ClassConstructor, moduleInfo: ModuleInfo): ControllerInstanceInfo | null {
+        let className = Class.name;
 
-    loadController(file: FileInfo) {
-        let {
-            controllerName,
-            ctrlOpts,
-            controller,
-            actions
-        } = this.processFile(file);
-
-        actions.forEach(action => this.processAction({ controller, action, controllerName, ctrlOpts, file }));
-    }
-}
-
-function defaultGetFiles(path: string, fileFilter: FileFilterFn, ext: string) {
-    let files: FileInfo[] = [];
-    recursiveFilterFiles(path, fileFilter, files, ext);
-    return files;
-}
-
-function defaultProcessFile(this: Loader, file: FileInfo): ControllerInfo {
-    let Controller = this.getControllerClass(file);
-    let controllerName = Controller.name;
-
-    let ctrlOpts: ControllerDecoratorOptions = (<any>Controller)[CONTROLLER];
-    if (!ctrlOpts) {
-        if (this.requireControllerDecorator) {
-            return;
-        }
-        ctrlOpts = {};
-    }
-
-    let controller = this.newController(Controller, this.controllerOpts);
-    if (!controller) {
-        return;
-    }
-
-    let actions: Action[] = controller[ACTIONS];
-    if (!actions) {
-        return;
-    }
-
-    if (this.filterActions) {
-        actions = this.filterActions(actions, controller);
-    }
-
-    return {
-        controllerName,
-        ctrlOpts,
-        controller,
-        actions
-    };
-}
-
-function defaultProcessAction(this: Loader, { controller, action, controllerName, ctrlOpts, file }: ProcessActionOptions) {
-    let middleware: any[] = [];
-
-    for (let collect of this.middlewareCollectors) {
-        if (!collect(controller, action, middleware)) {
-            return;
-        }
-    }
-
-    if (this.normalizeMiddleware) {
-        middleware = this.normalizeMiddleware(middleware);
-    }
-
-    let handler = controller[action.name].bind(controller);
-    middleware.push(handler);
-
-    let path = this.ensurePath({
-        action,
-        file,
-        controllerName,
-        ctrlOpts
-    });
-
-    this.registerRoute({
-        router: this.router,
-        action,
-        path,
-        middleware,
-        controllerName,
-        ctrlOpts
-    });
-}
-
-function defaultGetControllerClass(file: FileInfo) {
-    return require(file.absolutePath).default;
-}
-
-function defaultNewController(Controller: ControllerConstructor, opts: any) {
-    return new Controller(opts);
-}
-
-function defaultEnsurePath({ action, file, ctrlOpts }: EnsurePathOptions) {
-    if (action.path) {
-        if (ctrlOpts.prefix) {
-            return Path.join(ctrlOpts.prefix, action.path);
-        } else {
-            return action.path;
-        }
-    }
-
-    return Path.join('/', file.dirname, file.basename, action.name);
-}
-
-function defaultRegisterRoute({ router, action, path, middleware }: RegisterRouteOptions) {
-    router[action.method.toLowerCase()](path, ...middleware);
-    console.log(`Register Route "${action.method} ${path}"`);
-}
-
-function recursiveFilterFiles(path: string, filter: FileFilterFn, files: FileInfo[], ext: string, basePath?: string) {
-    if (!Path.isAbsolute(path)) {
-        path = Path.resolve(path);
-    }
-    basePath = basePath || path;
-
-    let dirs: string[] = [];
-    let list = fs.readdirSync(path);
-
-    list.forEach(name => {
-        let absolutePath = Path.join(path, name);
-        let stat = fs.statSync(absolutePath);
-
-        if (stat.isFile()) {
-            let dirname = Path.dirname(Path.relative(basePath, path));
-            let basename = Path.basename(path, ext);
-            if (filter(absolutePath, dirname, basename)) {
-                files.push({ absolutePath, dirname, basename });
+        let ctrlOpts: ControllerDecoratorOptions = Reflect.getMetadata(CONTROLLER, Class);
+        if (!ctrlOpts) {
+            if (this.requireControllerDecorator) {
+                return null;
             }
-        } else if (stat.isDirectory()) {
-            dirs.push(absolutePath);
+            ctrlOpts = {};
         }
-    });
 
-    dirs.forEach(dir => recursiveFilterFiles(dir, filter, files, ext, basePath));
+        let controller = this.instantiate(Class);
+        if (!controller) {
+            return null;
+        }
+
+        let actions: Action[] = Reflect.getMetadata(ACTIONS, controller);
+        if (!actions) {
+            return null;
+        }
+
+        actions = this.filterActions(actions, controller);
+
+        return {
+            file: moduleInfo.file,
+            Class,
+            className,
+            instance: controller,
+            ctrlOpts,
+            actions
+        };
+    }
+
+    protected filterActions(actions: Action[], _controller: any) {
+        return actions;
+    }
+
+    protected processInstance(info: ControllerInstanceInfo) {
+        info.actions.forEach(action => this.processAction(action, info));
+        return info;
+    }
+
+    protected processAction(action: Action, info: ControllerInstanceInfo) {
+        let middleware: any[] = [];
+
+        for (let collect of this.middlewareCollectors) {
+            if (!collect(info.instance, action, middleware)) {
+                return;
+            }
+        }
+
+        middleware = this.normalizeMiddleware(middleware);
+
+        let handler = info.instance[action.name].bind(info.instance);
+        middleware.push(handler);
+
+        let path = this.ensurePath({
+            action,
+            file: info.file,
+            className: info.className,
+            ctrlOpts: info.ctrlOpts
+        });
+
+        this.registerRoute({
+            action,
+            path,
+            middleware,
+            controllerName: info.className,
+            ctrlOpts: info.ctrlOpts
+        });
+    }
+
+    protected normalizeMiddleware(middleware: any[]): Function[] {
+        return middleware;
+    }
+
+    protected ensurePath({ action, file, ctrlOpts }: EnsurePathOptions): string {
+        if (action.path) {
+            if (ctrlOpts.prefix) {
+                return Path.join(ctrlOpts.prefix, action.path);
+            } else {
+                return action.path;
+            }
+        }
+
+        return Path.join('/', file.dirname, file.basename, action.name);
+    }
+
+    protected registerRoute({ action, path, middleware }: RegisterRouteOptions) {
+        this.router[action.method.toLowerCase()](path, ...middleware);
+        console.log(`Register Route "${action.method} ${path}"`);
+    }
 }
