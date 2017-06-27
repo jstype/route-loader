@@ -1,6 +1,6 @@
 {
   "name": "@jstype/route-loader",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Easy to load routes within a directory, support koa-radix-router, koa-router and so on.",
   "keywords": [
     "route",
