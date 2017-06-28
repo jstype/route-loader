@@ -31,16 +31,16 @@
     "example": "ts-node --project example example/app"
   },
   "dependencies": {
-    "@jstype/loader": "^1.0.0",
+    "@jstype/loader": "^1.1.0",
     "reflect-metadata": "^0.1.10"
   },
   "devDependencies": {
     "@types/koa": "^2.0.39",
-    "@types/node": "^8.0.3",
+    "@types/node": "^8.0.4",
     "koa": "^2.3.0",
     "koa-radix-router": "^1.0.0",
     "ts-node": "^3.1.0",
-    "typescript": "^2.4.0"
+    "typescript": "^2.4.1"
   },
   "engines": {
     "node": ">=6"

@@ -67,8 +67,8 @@ export interface ControllerDecoratorOptions {
 }
 
 export function Controller(opts?: ControllerDecoratorOptions): ClassDecorator {
-    return (target: ClassConstructor) => {
-        defineController(target, opts);
+    return (target: Function) => {
+        defineController(<ClassConstructor>target, opts);
     };
 }
 
@@ -80,9 +80,9 @@ export function defineController(Class: ClassConstructor, opts?: ControllerDecor
     Reflect.defineMetadata(CONTROLLER, opts || {}, Class);
 }
 
-export type CollectFn = (controller: any, action: Action, middleware: any[]) => boolean;
+export type CollectFn = (middleware: any[], controller: any, action: Action, originAction: Action) => boolean;
 
-export interface EnsurePathOptions {
+export interface EnsureActionOptions {
     action: Action;
     file: FileInfo;
     className: string;
@@ -91,7 +91,7 @@ export interface EnsurePathOptions {
 
 export interface RegisterRouteOptions {
     action: Action;
-    path: string;
+    originAction: Action;
     middleware: any[];
     controllerName: string;
     ctrlOpts: ControllerDecoratorOptions;
@@ -108,8 +108,9 @@ export interface LoaderOptions extends ClassLoaderOptions {
     filterActions?: (actions: Action[], controller: any) => Action[];
 
     processAction?: (action: Action, info: ControllerInstanceInfo) => void;
-    normalizeMiddleware?: (middleware: any[]) => Function[];
-    ensurePath?: (opts: EnsurePathOptions) => string;
+    ensureAction?: (opts: EnsureActionOptions) => Action;
+    collectMiddleware?: (info: ControllerInstanceInfo, action: Action, originAction: Action) => Function[] | null;
+    normalizeMiddleware?: (middleware: any[], handler: Function) => Function[];
 
     router?: any;
     registerRoute?: (opts: RegisterRouteOptions) => void;
@@ -129,8 +130,9 @@ export default class Loader extends ClassLoader {
             'router',
             'filterActions',
             'processAction',
+            'ensureAction',
+            'collectMiddleware',
             'normalizeMiddleware',
-            'ensurePath',
             'registerRoute'
         ], opts);
     }
@@ -183,53 +185,62 @@ export default class Loader extends ClassLoader {
     }
 
     protected processAction(action: Action, info: ControllerInstanceInfo) {
-        let middleware: any[] = [];
-
-        for (let collect of this.middlewareCollectors) {
-            if (!collect(info.instance, action, middleware)) {
-                return;
-            }
-        }
-
-        middleware = this.normalizeMiddleware(middleware);
-
-        let handler = info.instance[action.name].bind(info.instance);
-        middleware.push(handler);
-
-        let path = this.ensurePath({
-            action,
+        let originAction = action;
+        action = this.ensureAction({
+            action: Object.assign({}, originAction),
             file: info.file,
             className: info.className,
             ctrlOpts: info.ctrlOpts
         });
 
+        let middleware = this.collectMiddleware(info, action, originAction);
+        if (!middleware) {
+            return;
+        }
+
         this.registerRoute({
             action,
-            path,
+            originAction,
             middleware,
             controllerName: info.className,
             ctrlOpts: info.ctrlOpts
         });
     }
 
-    protected normalizeMiddleware(middleware: any[]): Function[] {
-        return middleware;
-    }
-
-    protected ensurePath({ action, file, ctrlOpts }: EnsurePathOptions): string {
+    protected ensureAction({ action, file, ctrlOpts }: EnsureActionOptions): Action {
         if (action.path) {
             if (ctrlOpts.prefix) {
-                return Path.join(ctrlOpts.prefix, action.path);
-            } else {
-                return action.path;
+                action.path = Path.join(ctrlOpts.prefix, action.path);
+            }
+        } else {
+            action.path = Path.join('/', file.dirname, file.basename, action.name);
+        }
+
+        return action;
+    }
+
+    protected collectMiddleware(info: ControllerInstanceInfo, action: Action, originAction: Action): Function[] | null {
+        let middleware: any[] = [];
+
+        for (let collect of this.middlewareCollectors) {
+            if (!collect(middleware, info.instance, action, originAction)) {
+                return null;
             }
         }
 
-        return Path.join('/', file.dirname, file.basename, action.name);
+        let handler = info.instance[action.name].bind(info.instance);
+        middleware = this.normalizeMiddleware(middleware, handler);
+
+        return middleware;
     }
 
-    protected registerRoute({ action, path, middleware }: RegisterRouteOptions) {
-        this.router[action.method.toLowerCase()](path, ...middleware);
-        console.log(`Register Route "${action.method} ${path}"`);
+    protected normalizeMiddleware(middleware: any[], handler: Function): Function[] {
+        middleware.push(handler);
+        return middleware;
+    }
+
+    protected registerRoute({ action, middleware }: RegisterRouteOptions) {
+        this.router[action.method.toLowerCase()](action.path, ...middleware);
+        console.log(`[Register Route] "${action.method} ${action.path}"`);
     }
 }
